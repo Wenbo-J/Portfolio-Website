@@ -1,0 +1,130 @@
+---
+title: "My LLM Prompt-Engineering Workflow"
+description: "A 7-step playbook I use to go from fuzzy idea to production-ready prompt."
+date: "2025-05-01"
+---
+
+> **TL;DR** – I treat prompts like _functions_: they take **inputs**, run through
+> **context-retrieval**, then assert **acceptance tests** before shipping.  
+> This post shows the exact 7-step loop I follow for every Gen-AI feature I
+> build.
+
+---
+
+## 1  Clarify the goal 🧭 (Write the acceptance test first)
+
+1. Jot the **user story** in _one sentence_.  
+2. Turn it into a **minimal assertion**; e.g.:
+
+```text
+Input: “Summarise the paper attached.”
+Output must:
+  ✓ return <=150 words
+  ✓ preserve any numbers verbatim
+  ✓ cite the paper title at least once
+I keep these tests beside the prompt in the repo so reviewers see intent up
+front.
+
+2 Retrieve relevant context automatically 🔍
+
+Nearly every prod-grade prompt is RAG-enhanced.
+My retrieval loop:
+
+flowchart TD
+  A[User query] -->|text / file| B[Pinecone ➜ top-k chunks]
+  B --> C{Compose <br>Context Window}
+  C --> D[Gemini 1.5 / GPT-4o]
+
+Tips
+
+    Chunk ≈ 500 tokens, overlap 50.
+
+    Embed with the same model family you’ll generate with (OpenAI v3 ↔ GPT-4,
+    Gemini-Pro ↔ Gemini 1.5, etc.).
+
+3 Separate system, context, and task blocks 🧱
+
+A pattern that survives model upgrades:
+
+### SYSTEM
+You are an expert technical writer…
+
+### CONTEXT
+{retrieved_docs}
+
+### TASK
+{user_instruction}
+
+Keeping them as triple-hashed headers makes debugging diff-friendly.
+
+
+4 Parameterise the prompt 🔢
+
+I template with mustache-style tokens so everything is
+string-replaceable:
+
+{{system}}
+
+Here is relevant reference material:
+{{context}}
+
+Use the material above to answer:
+{{task}}
+
+In production I call prompt = template.replaceAll('{{foo}}', value) rather
+than building raw strings.
+
+
+5 Version-control and label 📌
+
+prompts/
+  summarise@v1.txt
+  summarise@v2-fix-citations.txt
+
+I never delete old prompts; I just bump a @vN suffix. Deployment picks the
+stable symlink.
+
+
+6 Automated acceptance tests ✅
+
+I run Playwright + Jest in CI:
+
+import { callModel } from "@/lib/ai";
+
+it("stays under 150 words", async () => {
+  const out = await callModel("summarise@stable", paperSample);
+  expect(out.split(" ").length).toBeLessThanOrEqual(150);
+});
+
+Failing the test blocks merge, so no human accidentally ships a broken tweak.
+
+
+7 Instrument & iterate 📈
+
+const t0 = performance.now();
+const answer = await callModel("summarise@stable", user);
+logPrompt({
+  prompt_id: "summarise@v3",
+  latency: performance.now() - t0,
+  tokens_in: prompt.length,
+  tokens_out: answer.length,
+});
+
+After ~100 calls I review logs → trim instructions or swap models if needed.
+
+Wrapping up
+
+Prompt engineering ≠ tap-typing clever phrases; it’s software
+
+| Phase                 | SWE analogue       |
+| --------------------- | ------------------ |
+| Write acceptance test | TDD spec           |
+| Template prompt       | Function signature |
+| Version and test      | CI / SemVer        |
+| Instrument            | Observability      |
+
+
+Adopt the loop and you’ll ship AI features that survive scale and teammate
+turnover. Happy prompting!
+
+PS: As you probably have noticed, this whole site was made with prompt engineering!
